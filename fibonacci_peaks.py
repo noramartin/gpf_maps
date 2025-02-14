@@ -9,7 +9,7 @@ from scipy.stats import gmean, skew
 import pandas as pd
 import sys
 from collections import Counter
-from functions.navigability_functions import find_navigability, neighbours_g, find_mut_path
+from functions.navigability_functions import find_navigability, neighbours_g
 from functions.fibonacci_functions import *
 import parameters as param
 
