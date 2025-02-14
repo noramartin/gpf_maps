@@ -228,26 +228,6 @@ def count_peaks(NC_network, NCindex_vs_ph, NC_vs_evolv, NC_vs_size, phenotpes_li
 
 #######################################################################
 
-def find_mut_path(iterations, number_source_target_pairs, NC_network, pheno_vs_NCs, NC_vs_ph, NC_vs_size):
-	nav, nav_norm = 0, 0
-	phenotpes_list = list([p for p in pheno_vs_NCs.keys() if len([NC for NC in pheno_vs_NCs[p] if NC in NC_network.nodes()]) > 0])
-	for iteration in range(iterations):
-		for source_target_count in range(number_source_target_pairs):
-			source_ph = np.random.choice(phenotpes_list)
-			target_ph = np.random.choice([p for p in phenotpes_list if p != source_ph])
-			sourceNCs = [NC for NC in pheno_vs_NCs[source_ph] if NC in NC_network.nodes()]
-			source = np.random.choice(sourceNCs, p = np.array([NC_vs_size[NC] for NC in sourceNCs])/sum([NC_vs_size[NC] for NC in sourceNCs]))
-			is_accessible = 0
-			for target in pheno_vs_NCs[target_ph]:
-				if target in NC_network.nodes() and nx.has_path(NC_network, source, target):
-					is_accessible = 1
-					break 
-			nav += is_accessible
-			nav_norm += 1
-	assert nav_norm == number_source_target_pairs * iterations
-	print('navigability', nav/nav_norm)
-	return nav/nav_norm
-
 def find_navigability(iterations, number_source_target_pairs, NC_network, pheno_vs_NCs, NC_vs_ph, NC_vs_size, all_connected=False):
 	if all_connected:
 		print('including connectivity check')
