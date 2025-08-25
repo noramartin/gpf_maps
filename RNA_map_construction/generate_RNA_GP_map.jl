@@ -6,7 +6,7 @@ using DelimitedFiles
 ### RBP:
 
 all_TFs = ["'a2bp1'", "'B52'", "'bru-3'", "'CG2931'", "'CG2950'","'CG7903'","'cpo'","'elav'","'how'",
-    "'msi'","'lark'","'Hrb27C'","'Hrb87F'","'Hrb98DE'","'orb2'","'pAbp'","'Rbp1'","'Rbp1-like'","'Rbp9'","'rin'","'Rox8'","'SF2'","'sm'","'snf'","'Srp54'","'Sxl'", "'U2af50'"]
+    "'msi'","'lark'","'Hrb27C'","'Hrb87F'","'Hrb98DE'","'orb2'","'pAbp'","'Rbp1'","'Rbp1-like'","'Rbp9'","'rin'","'Rox8'","'SF2'","'sm'","'snf'","'Srp54'","'Sxl'", "'U2af50'", "'aret'","'papi'","'fne'","'pum'","'shep'","'tra2'"]
 
 gp =Dict()
 
@@ -15,7 +15,7 @@ for tf in all_TFs
    
         
         try 
-            data = readdlm("/Users/msrivast/Desktop/genonets_output/rbp/Drosophila_melanogaster/tau350/$(tf[2:end-1])_genotype_measures.txt",'\t')
+            data = readdlm("Drosophila_RBPs/$(tf[2:end-1])_genotype_measures.txt",'\t')
            #println("connected network")
             for i in collect(2:1:size(data)[1])
                 cc = "'"*tf[2:end-1]*"'"
