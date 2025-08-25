@@ -19,3 +19,17 @@ The scripts in the main folder contain the following content:
 - NC_graph_plots.py - this script reads in files from "analyse_greenbury_GPmaps.py", prints the information for SM Table 1 (including checks against Greenbury et al.'s numbers, where they report the same quantities for their GP maps), and generates the SM plots characterising NC graphs (NC sizes, evolvabilities etc.).
 - ruggedness_and_nav_plots.py - this script reads in data from "analyse_greenbury_GPmaps.py", and creates all plots focussing on peaks and navigability, except those produced by the fibonacci_plots.py script.
 - parameters_plots.py and parameters.py are just parameter files.
+
+For the "RNA_map_construction" folder:
+
+The code uses Julia 1.9.4 and requires the following Julia packages: DelimitedFiles, CSV, DataFrames, and NPZ.
+
+The script `generate_RNA_GP_map.jl' contains the following content:
+- Reads RNA binding protein (RBP) binding data.
+- Builds a genotype–phenotype (GP) map for short RNA sequences of length 7 nucleotides.
+- The phenotype is the list of RNA binding proteins that each RNA sequence binds to.
+- The GP map is then saved as a NumPy `.npy` file (`GPmap_RNA.npy`) for later use in Python.
+
+
+
+
