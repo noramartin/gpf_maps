@@ -102,22 +102,20 @@ if type_analysis == -1:
 			pf_map = {ph: f for ph, f in zip(phenotpes_list, np.random.uniform(0, 1, size=len(phenotpes_list)))}
 			pf_map[0] = 0
 			phenotype_network_directed_edges = get_directed_network_edges(phenotype_network, pheno_vs_fitness = pf_map)
+			phenotype_network_directed_st = nx.DiGraph()
+			phenotype_network_directed_st.add_edges_from([e for e in phenotype_network_directed_edges])
+			##
+			geno_graph = make_genotype_network_tests(GPmap, neighbours_function, pf_map)
 			print('repetition nav', rep)
+			target = max(phenotpes_list, key=pf_map.get)
 			for rep2 in range(param.number_source_target_pairs):
-				source = np.random.choice(phenotpes_list)
-				target = np.random.choice([p for p in phenotpes_list if p != source])
-				pf_map2 = deepcopy(pf_map)
-				pf_map2[target] = 1
+				source = np.random.choice([p for p in phenotpes_list if p != target and p > 0])
 				#### test if path in NC graph
-				phenotype_network_directed_st = nx.DiGraph()
-				phenotype_network_directed_st.add_nodes_from([source, target])
-				phenotype_network_directed_st.add_edges_from([e for e in phenotype_network_directed_edges if target not in e])
-				for n in phenotype_network.neighbors(target):
-					assert pf_map2[target] > pf_map2[n]
-					phenotype_network_directed_st.add_edge(n, target)
+				for n in [source, target]:
+					if n not in phenotype_network_directed_st:
+						phenotype_network_directed_st.add_node(n)
 				path_NC_graph = nx.has_path(phenotype_network_directed_st, source, target)
 				### test if path in geno graph
-				geno_graph = make_genotype_network_tests(GPmap, neighbours_function, pf_map2)
 				g_source = np.random.choice([''.join([str(x) for x in g]) for g, ph in np.ndenumerate(GPmap) if ph == source])
 				g_target = np.random.choice([''.join([str(x) for x in g]) for g, ph in np.ndenumerate(GPmap) if ph == target])
 				path_geno_graph = nx.has_path(geno_graph, g_source, g_target)
@@ -134,6 +132,8 @@ if type_analysis == -1:
 			mean_nav = 0
 			phenotype_network = make_phenotype_network_deleted_nodes(permill_to_keep, GPmap, neighbours_function, phenotype_network_filename='')
 			phenotpes_list = [int(n) for n in phenotype_network.nodes()]
+			
+
 			assert 0 not in phenotpes_list and (permill_to_keep == 'all' or len(phenotpes_list) <= int(round(permill_to_keep/1000* nph)))
 			if len(phenotpes_list) < 3:
 				continue
@@ -144,20 +144,19 @@ if type_analysis == -1:
 				for ph in np.unique(GPmap):
 					if ph not in phenotpes_list: #deleted pheno
 						pf_map[ph] = 0
+				target = max(phenotpes_list, key=pf_map.get)
+				phenotype_network_directed_st = nx.DiGraph()
+				phenotype_network_directed_st.add_node(target)
+				phenotype_network_directed_st.add_edges_from([e for e in phenotype_network_directed_edges])
 				for rep2 in range(param.number_source_target_pairs):
-					source = np.random.choice(phenotpes_list)
-					target = np.random.choice([p for p in phenotpes_list if p != source])
-					#### test if path in NC graph
-					phenotype_network_directed_st = nx.DiGraph()
-					phenotype_network_directed_st.add_edges_from([e for e in phenotype_network_directed_edges if target not in e])
-					for n in phenotype_network.neighbors(target):
-						phenotype_network_directed_st.add_edge(n, target)					
+					source = np.random.choice([p for p in phenotpes_list if p != target])
+					if source not in phenotype_network_directed_st:
+						phenotype_network_directed_st.add_node(source)
+					#### test if path in NC graph				
 					path_NC_graph = nx.has_path(phenotype_network_directed_st, source, target)
 					### test if path in geno graph
-					pf_map2 = deepcopy(pf_map)
-					pf_map2[target] = 1
-					assert len([ph for ph, f in pf_map2.items() if f > 0]) == len([ph for ph in phenotype_network_directed_st.nodes()]) #only non-isolated non-zero nodes in NC graph
-					geno_graph = make_genotype_network_tests(GPmap, neighbours_function, pf_map2)
+					assert len([ph for ph, f in pf_map.items() if f > 0]) == len([ph for ph in phenotype_network_directed_st.nodes()]) #only non-isolated non-zero nodes in NC graph
+					geno_graph = make_genotype_network_tests(GPmap, neighbours_function, pf_map)
 					g_source = np.random.choice([''.join([str(x) for x in g]) for g, ph in np.ndenumerate(GPmap) if ph == source])
 					g_target = np.random.choice([''.join([str(x) for x in g]) for g, ph in np.ndenumerate(GPmap) if ph == target])
 					path_geno_graph = nx.has_path(geno_graph, g_source, g_target)
@@ -191,6 +190,9 @@ if type_analysis == 3:
 				phenotype_network = make_phenotype_network(GPmap, neighbours_function, phenotpes_list=phenotpes_list)
 				phenotype_network_str_nodes = nx.relabel_nodes(phenotype_network, mapping={n: str(n) for n in phenotype_network.nodes()}, copy=True)
 				nx.write_gml(phenotype_network_str_nodes, phenotype_network_filename)
+			n_zero_degree = [n for n in phenotype_network.nodes() if phenotype_network.degree[n] == 0]
+			print('zero-degree phenos', type_model, [pheno_int_to_str(n, K) for n in n_zero_degree])
+			assert (len(n_zero_degree) == 1 and type_model.startswith('low_evolvability')) or len(n_zero_degree) == 0
 			phenotype_network.remove_nodes_from([n for n in phenotype_network.nodes() if phenotype_network.degree[n] == 0])
 			phenotpes_list = [ph for ph in phenotype_network.nodes()]
 			####################################################################################################################################################
@@ -198,16 +200,14 @@ if type_analysis == 3:
 			####################################################################################################################################################
 			for r in range(param.iterations_nav):
 				pf_map = {ph: f for ph, f in zip(phenotpes_list, np.random.uniform(0, 1, size=len(phenotpes_list)))}
+				target = max(phenotpes_list, key=pf_map.get)
 				phenotype_network_directed_edges = get_directed_network_edges(phenotype_network, pf_map)
+				phenotype_network_directed_st = nx.DiGraph()
+				phenotype_network_directed_st.add_edges_from([e for e in phenotype_network_directed_edges])
 				for r2 in range(param.number_source_target_pairs):
-					source = np.random.choice(phenotpes_list)
-					target = np.random.choice([p for p in phenotpes_list if p != source])
-					phenotype_network_directed_st = nx.DiGraph()
-					phenotype_network_directed_st.add_edges_from([e for e in phenotype_network_directed_edges if target not in e])
-					phenotype_network_directed_st.add_node(source)
-					phenotype_network_directed_st.add_node(target)
-					for n in phenotype_network.neighbors(target):
-						phenotype_network_directed_st.add_edge(n, target)
+					source = np.random.choice([p for p in phenotpes_list if p != target])		
+					for n in [source, target]:
+						assert n in phenotype_network_directed_st			
 					pathlength_list = [len(p) for p in nx.all_simple_paths(phenotype_network_directed_st, source, target, cutoff=max_path_length_to_compute)] #all paths on a NC graph are simple paths since every non-neutral mutation is a step up in fiitness, so can never return to a node
 					pathlength_counter = Counter(pathlength_list)
 					for l in range(1, max_path_length_to_compute + 1):
@@ -222,51 +222,61 @@ if type_analysis == 3:
 print('deleting phenotypes')
 ####################################################################################################################################################
 if type_analysis == 4:
-	mutations_only = 'standard'
-	percentage_to_keep_vs_mean_evolv, percentage_to_keep_vs_mean_nav, percentage_to_keep_vs_nph = {}, {}, {}
-	for permill_to_keep in [1, 10, 100, 500, 'all']:
-		type_model = mutations_only + '_reduced_phenos_permill_'+str(permill_to_keep)
-		print(type_model)
-		if type_model.startswith('standard'):
-			neighbours_function = partial(neighbours_g, K=K, L=L)
-		elif type_model.startswith('low_evolvability'):
-			neighbours_function = partial(neighbours_g_not_stopcodon, K=K, L=L)
-		####################################################################################################################################################
-		print('get network of phenotypes (in this case equals NCs)')
-		####################################################################################################################################################
-		phenotype_network_filename = './data/fibonacciGPmap_L'+str(L) +'_'+str(K)+type_model+ '.gml'
-		if isfile(phenotype_network_filename):
-			phenotype_network_str_nodes = nx.read_gml(phenotype_network_filename)
-			phenotype_network = nx.relabel_nodes(phenotype_network_str_nodes, mapping={n: int(n) for n in phenotype_network_str_nodes.nodes()}, copy=True)	
-		else:
-			phenotype_network = make_phenotype_network_deleted_nodes(permill_to_keep, GPmap, neighbours_function, phenotype_network_filename)
-		assert len([n for n in phenotype_network if len(set([ph2 for ph2 in phenotype_network.neighbors(n)])) == 0]) == 0
-		phenotpes_list = [n for n in phenotype_network if len(set([ph2 for ph2 in phenotype_network.neighbors(n)])) > 0]
-		if len(phenotpes_list) <= 5:
-			continue
-		evolv_values = [len(set([ph2 for ph2 in phenotype_network.neighbors(ph)])) for ph in phenotpes_list]
-		assert min(evolv_values) > 0
-		percentage_to_keep_vs_mean_evolv[type_model] = gmean([e for e in evolv_values])
-		phenotpes_list = [ph for ph in phenotype_network.nodes()]
-		percentage_to_keep_vs_nph[type_model] = len(phenotpes_list)
-		assert min(phenotpes_list) > 0
-		####################################################################################################################################################
-		print('get navigability in random phenotype-fitness assignment')
-		####################################################################################################################################################
-		nav_filename = './data/fibonaccinetwork_phenotypes_L'+str(L) +'_'+str(K)+'_iterations'+str(param.iterations_nav)+'_'+str(param.number_source_target_pairs)+type_model+ 'list_navigability.npy'
-		if not isfile(nav_filename):
-			navigability = find_navigability(param.iterations_nav, param.number_source_target_pairs, phenotype_network, {ph: [ph,] for ph in phenotpes_list}, {ph: ph for ph in phenotpes_list}, {ph: ph_vs_size[ph] for ph in phenotpes_list})
-			np.save(nav_filename, np.array([navigability]))
-			del phenotype_network
-		else:
-			navigability = np.mean(np.load(nav_filename))
-		percentage_to_keep_vs_mean_nav[type_model] = np.mean(navigability)
-	type_model_list = [p  for p in percentage_to_keep_vs_mean_evolv.keys()]
-	number_pheno_list = [percentage_to_keep_vs_nph[p] for p in type_model_list]
-	evolv_list = [percentage_to_keep_vs_mean_evolv[p] for p in type_model_list]
-	nav_list = [percentage_to_keep_vs_mean_nav[p] for p in type_model_list]
-	df_nav = pd.DataFrame.from_dict({'number of phenotypes': number_pheno_list, 'navigability': nav_list, 'evolvability': evolv_list})
-	df_nav.to_csv('./data/fibonacci'+'_navigability_data_deleted_phenotypes_L'+str(L) +'_'+str(K)+'_iterations'+str(param.iterations_nav)+'_'+str(param.number_source_target_pairs)+ 'missing_phenos.csv')
+	filename = './data/fibonacci'+'_navigability_data_deleted_phenotypes_L'+str(L) +'_'+str(K)+'_iterations'+str(param.iterations_nav)+'_'+str(param.number_source_target_pairs)+ 'missing_phenos.csv'
+	if not isfile(filename):
+		mutations_only = 'standard'
+		percentage_to_keep_vs_mean_evolv, percentage_to_keep_vs_mean_nav, percentage_to_keep_vs_nph, percentage_to_keep_vs_coeff_var, percentage_to_keep_vs_max_ev, percentage_to_keep_vs_connected_comp  = {}, {}, {}, {}, {}, {}
+		for permill_to_keep in [1, 10, 100, 500, 'all']:
+			type_model = mutations_only + '_reduced_phenos_permill_'+str(permill_to_keep)
+			print(type_model)
+			if type_model.startswith('standard'):
+				neighbours_function = partial(neighbours_g, K=K, L=L)
+			elif type_model.startswith('low_evolvability'):
+				neighbours_function = partial(neighbours_g_not_stopcodon, K=K, L=L)
+			####################################################################################################################################################
+			print('get network of phenotypes (in this case equals NCs)')
+			####################################################################################################################################################
+			phenotype_network_filename = './data/fibonacciGPmap_L'+str(L) +'_'+str(K)+type_model+ '.gml'
+			if isfile(phenotype_network_filename):
+				phenotype_network_str_nodes = nx.read_gml(phenotype_network_filename)
+				phenotype_network = nx.relabel_nodes(phenotype_network_str_nodes, mapping={n: int(n) for n in phenotype_network_str_nodes.nodes()}, copy=True)	
+			else:
+				phenotype_network = make_phenotype_network_deleted_nodes(permill_to_keep, GPmap, neighbours_function, phenotype_network_filename)
+			assert len([n for n in phenotype_network if len(set([ph2 for ph2 in phenotype_network.neighbors(n)])) == 0]) == 0			
+			phenotpes_list = [n for n in phenotype_network if len(set([ph2 for ph2 in phenotype_network.neighbors(n)])) > 0]
+			if len(phenotpes_list) <= 5:
+				continue
+			evolv_values = [len(set([ph2 for ph2 in phenotype_network.neighbors(ph)])) for ph in phenotpes_list]
+			assert min(evolv_values) > 0
+			percentage_to_keep_vs_mean_evolv[type_model] = gmean([e for e in evolv_values])
+			phenotpes_list = [ph for ph in phenotype_network.nodes()]
+			percentage_to_keep_vs_nph[type_model] = len(phenotpes_list)
+			percentage_to_keep_vs_max_ev[type_model] = max([e for e in evolv_values])
+			print(np.mean([e for e in evolv_values]))
+			percentage_to_keep_vs_connected_comp[type_model] = nx.number_connected_components(phenotype_network)
+			percentage_to_keep_vs_coeff_var[type_model] = np.std([e for e in evolv_values])/np.mean([e for e in evolv_values])
+			assert min(phenotpes_list) > 0
+			####################################################################################################################################################
+			print('get navigability in random phenotype-fitness assignment')
+			####################################################################################################################################################
+			nav_filename = './data/fibonaccinetwork_phenotypes_L'+str(L) +'_'+str(K)+'_iterations'+str(param.iterations_nav)+'_'+str(param.number_source_target_pairs)+type_model+ 'list_navigability.npy'
+			if not isfile(nav_filename):
+				navigability = find_navigability(param.iterations_nav, param.number_source_target_pairs, phenotype_network, {ph: [ph,] for ph in phenotpes_list}, {ph: ph for ph in phenotpes_list}, {ph: ph_vs_size[ph] for ph in phenotpes_list})
+				np.save(nav_filename, np.array([navigability]))
+				del phenotype_network
+			else:
+				navigability = np.mean(np.load(nav_filename))
+			percentage_to_keep_vs_mean_nav[type_model] = np.mean(navigability)
+		type_model_list = [p  for p in percentage_to_keep_vs_mean_evolv.keys()]
+		number_pheno_list = [percentage_to_keep_vs_nph[p] for p in type_model_list]
+		evolv_list = [percentage_to_keep_vs_mean_evolv[p] for p in type_model_list]
+		nav_list = [percentage_to_keep_vs_mean_nav[p] for p in type_model_list]
+		connected_components_list = [percentage_to_keep_vs_connected_comp[p] for p in type_model_list]
+		coeff_var_list = [percentage_to_keep_vs_coeff_var[p] for p in type_model_list]
+		max_ev_list = [percentage_to_keep_vs_max_ev[p] for p in type_model_list]
+		df_nav = pd.DataFrame.from_dict({'number of phenotypes': number_pheno_list, 'navigability': nav_list, 'evolvability': evolv_list, 
+										'coefficient variation evolv': coeff_var_list, 'connected components': connected_components_list, 'maximum evolv': max_ev_list})
+		df_nav.to_csv(filename)
 
 
 ####################################################################################################################################################
@@ -314,7 +324,7 @@ if type_analysis == 5:
 					coefvar_list.append(np.std(evolv_values)/np.mean(evolv_values))
 					skew_list.append(skew(evolv_values))
 					###
-					df_degree = pd.DataFrame.from_dict({'seq': evolv_values})
+					df_degree = pd.DataFrame.from_dict({'degree': evolv_values})
 					df_degree.to_csv('./data/deg_sequence_'+str(type_dist)+'_'+str(nph)+'reps'+str(reps)+'.csv')
 
 	df_nav = pd.DataFrame.from_dict({'evolvability': evolvability_list, 'number of phenotypes': number_pheno_list, 'type distribution': type_dist_list, 'navigability': nav_list, 'coefficient of variation': coefvar_list, 'skew': skew_list})

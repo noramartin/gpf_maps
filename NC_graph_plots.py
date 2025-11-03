@@ -10,7 +10,7 @@ from matplotlib.lines import Line2D
 import parameters as param
 import parameters_plots as plotparam
 from functions.navigability_functions import isundefinedpheno, load_dict
-
+from scipy import stats
 
 ####################################################################################################################################################
 print('number of NCs for all models - info for table')
@@ -33,8 +33,18 @@ for type_structure in param.all_types_structue:
 			map_vs_mean_size_of_zero_evolv_NCs[type_structure] = ''
 		map_vs_undefined[type_structure] = 1 - sum([NC_vs_size[NC] for NC in NC_vs_evolv.keys() if NC > 0])/param.type_structure_vs_K[type_structure]**param.type_structure_vs_L[type_structure] 
 for type_structure in map_vs_number_NCs:
-	print(plotparam.type_structure_vs_label[type_structure], '&', map_vs_number_NCs[type_structure],  '&', param.type_structure_vs_K[type_structure]**param.type_structure_vs_L[type_structure], '&', map_vs_number_pheno[type_structure], '&', map_vs_zero_evolv_NCs[type_structure], '&', map_vs_mean_size_of_zero_evolv_NCs[type_structure], '&', int(round(100*map_vs_undefined[type_structure])), '\%', '\\', '\n', '\hline')
-
+	print(plotparam.type_structure_vs_label[type_structure],'&', param.type_structure_vs_L[type_structure],'&', param.type_structure_vs_K[type_structure], '&', map_vs_number_NCs[type_structure],  '&', param.type_structure_vs_K[type_structure]**param.type_structure_vs_L[type_structure], '&', map_vs_number_pheno[type_structure], '&', map_vs_zero_evolv_NCs[type_structure], '&', map_vs_mean_size_of_zero_evolv_NCs[type_structure], '&', int(round(100*map_vs_undefined[type_structure])), '\%', '\\', '\n', '\hline')
+####################################################################################################################################################
+print('number of phenotypes with one zero-evolv NC')
+####################################################################################################################################################
+for type_structure in param.all_types_structue:
+	NC_evolv_filename = './data/NC_evolv_'+type_structure+ '.csv'
+	if isfile(NC_evolv_filename):
+		NC_vs_evolv = load_dict(NC_evolv_filename)
+		NCindex_vs_ph = load_dict('./data/NC_array'+ type_structure+'NCindex_vs_ph.csv')
+		number_phenotypes = len(set([p for p in NCindex_vs_ph.values()]))
+		number_phenotypes_with_zero_evolv_NCs = len(set([p for NC, p in NCindex_vs_ph.items() if NC_vs_evolv[NC] == 0])) 
+		print(type_structure, round(100*number_phenotypes_with_zero_evolv_NCs/number_phenotypes), '% of phenotypes have zero-evolv NCs')
 ####################################################################################################################################################
 print('checks against Greenbury data tables')
 ####################################################################################################################################################
@@ -83,10 +93,14 @@ for i, type_structure in enumerate(param.all_types_structue):
 		NC_vs_size = load_dict(NC_vs_size_filename)
 		NC_vs_evolv = load_dict(NC_evolv_filename)
 		NC_list = [NC for NC in NC_vs_size if NC > 0]
-		ax[i//5, i%5].scatter([np.log10(NC_vs_size[NC]) for NC in NC_list], [np.log10(NC_vs_evolv[NC]) if NC_vs_evolv[NC] > 0 else np.nan for NC in NC_list], s=3, c='r', linestyle='-', zorder=0)
+		NCsize_list, evolv_list = [np.log10(NC_vs_size[NC]) for NC in NC_list], [np.log10(NC_vs_evolv[NC]) if NC_vs_evolv[NC] > 0 else np.nan for NC in NC_list]
+		ax[i//5, i%5].scatter(NCsize_list, evolv_list, s=3, c='r', linestyle='-', zorder=0)
 		ax[i//5, i%5].plot([-0.1, 8], [np.log10(map_vs_number_pheno[type_structure] - 1),]*2, c='k', linestyle=':', zorder=-2)
 		ax[i//5, i%5].set_title(plotparam.type_structure_vs_label[type_structure])
 		print(type_structure, 'max evolv compared to max', map_vs_number_pheno[type_structure] - 1 - max([e for e in NC_vs_evolv.values()]))
+		NCsize_list_nonan, evolv_list_nonan = zip(*[(x, y) for x, y in zip(NCsize_list, evolv_list) if not np.isnan(y)])
+		print(type_structure, 'log size vs evolv gradient', stats.linregress(NCsize_list_nonan, evolv_list_nonan).slope)
+		print(type_structure, 'log size vs evolv r-value', stats.linregress(NCsize_list_nonan, evolv_list_nonan).rvalue)
 		if 'Fibonacci' in type_structure:
 			length_coding_region = np.arange(0, L)
 			size = [(K ** (L - l - 1)) for l in length_coding_region]
@@ -179,7 +193,7 @@ for i, type_structure in enumerate(param.all_types_structue):
 		cum_dist = np.divide([len([x for x in sorted_degrees if x >= s]) for s in unique_degrees], len(NC_vs_degree))
 		ax[i//5, i%5].scatter(unique_degrees, cum_dist, s=5, c='grey', linestyle='-')
 		ax[i//5, i%5].set_title(plotparam.type_structure_vs_label[type_structure])# + '\n' +'{:.2e}'.format(len(NC_list)) + 'NCs')
-		ax[i//5, i%5].set_ylabel('fraction of NCs\nwith degree k or greater')
+		ax[i//5, i%5].set_ylabel('fraction of NCs\n'+r'with degree $\geq k$')
 		ax[i//5, i%5].set_xlabel('NC degree k')
 		ax[i//5, i%5].set_yscale('log')
 		ax[i//5, i%5].set_ylim(0.3* min(cum_dist), 3)
@@ -190,80 +204,3 @@ for i, type_structure in enumerate(param.all_types_structue):
 f.tight_layout()
 f.savefig('./plots/degree_dist'+'.png', bbox_inches='tight', dpi=200)
 
-####################################################################################################################################################
-print('size vs evolv in each GP map -- include fit')
-####################################################################################################################################################
-f, ax = plt.subplots(ncols  = 5, nrows=2, figsize=(15, 5.5), sharex=True, sharey=True)
-for i, type_structure in enumerate(param.all_types_structue):
-	K, L = param.type_structure_vs_K[type_structure], param.type_structure_vs_L[type_structure]
-	NC_evolv_filename = './data/NC_evolv_'+type_structure+ '.csv'
-	NC_vs_size_filename = './data/NC_array'+ type_structure +'NC_vs_size.csv'
-	if isfile(NC_evolv_filename):
-		NC_vs_size = load_dict(NC_vs_size_filename)
-		NC_vs_evolv = load_dict(NC_evolv_filename)
-		NC_list = [NC for NC in NC_vs_size if NC > 0]
-		ax[i//5, i%5].scatter([np.log10(NC_vs_size[NC]) for NC in NC_list], [np.log10(NC_vs_evolv[NC]) if NC_vs_evolv[NC] > 0 else np.nan for NC in NC_list], s=3, c='r', linestyle='-', zorder=0)
-		ax[i//5, i%5].plot([-0.1, 8], [np.log10(map_vs_number_pheno[type_structure] - 1),]*2, c='k', linestyle=':', zorder=-2)
-		ax[i//5, i%5].set_title(plotparam.type_structure_vs_label[type_structure])
-		###### fit
-		min_e, max_e = max(1, min([e for e in NC_vs_evolv.values()])), max([e for e in NC_vs_evolv.values()])
-		min_s, max_s = max(1, min([e for e in NC_vs_size.values()])), max([e for e in NC_vs_size.values()])
-		beta = np.log(min_e/max_e)/np.log(min_s/max_s)
-		print('evolvability-size power law', type_structure, beta)
-		ax[i//5, i%5].plot([np.log10(NC_vs_size[NC]) for NC in NC_list], [np.log10(max_e * (NC_vs_size[NC]/max_s)**beta) for NC in NC_list], c='g')
-		#####
-		if 'Fibonacci' in type_structure:
-			length_coding_region = np.arange(0, L)
-			size = [(K ** (L - l - 1)) for l in length_coding_region]
-			if 'null' not in type_structure:
-				evolv = [(K - 1) * l + (K - 1) * sum([(K-1)**lnc for lnc in range(0, L - l - 1 )]) for l in length_coding_region] #new coding region can be up to L -l -2
-			else:
-				evolv = [(K - 2) * l for l in length_coding_region]
-			ax[i//5, i%5].plot(np.log10(size), np.log10(evolv), c='grey', zorder=-5)
-		assert max([np.log10(NC_vs_size[NC]) for NC in NC_list]) < 7 #check axis limits
-	ax[i//5, i%5].set_xlim(-0.03, 7)
-	if i // 5 == 1:
-		ax[i//5, i%5].set_xlabel(r'$\log_{10} |NC|$')
-	if i % 5 == 0:
-		ax[i//5, i%5].set_ylabel(r'$\log_{10} \epsilon_{NC}$') #+'\n'+r'$\epsilon_p = 0$ plotted as -1')
-	[ax[i//5, i%5].annotate('ABCDEFGHIJ'[i], xy=(0.05, 0.85), xycoords='axes fraction', fontsize=17, fontweight='bold') for i in range(9)]
-	ax[9//5, 9%5].axis('off')
-
-f.tight_layout()
-f.savefig('./plots/evolv_vs_size2.png', bbox_inches='tight', dpi=200)
-
-####################################################################################################################################################
-print('evolv per pheno vs per NC')
-####################################################################################################################################################
-f, ax = plt.subplots(ncols  = 5, nrows=2, figsize=(15, 5.5))
-for i, type_structure in enumerate(param.all_types_structue):
-	K, L = param.type_structure_vs_K[type_structure], param.type_structure_vs_L[type_structure]
-	NC_evolv_filename = './data/NC_evolv_'+type_structure+ '.csv'
-	NC_vs_size_filename = './data/NC_array'+ type_structure +'NC_vs_size.csv'
-	NCindex_vs_ph_filename = './data/NC_array'+ type_structure+ 'NCindex_vs_ph.csv'
-	if isfile(NC_evolv_filename):
-		NC_vs_size = load_dict(NC_vs_size_filename)
-		NC_vs_evolv = load_dict(NC_evolv_filename)
-		NCindex_vs_ph = load_dict(NCindex_vs_ph_filename)
-		ph_vs_NCs = {}
-		for NC, ph in NCindex_vs_ph.items():
-			try:
-				ph_vs_NCs[ph].append(NC)
-			except KeyError:
-				ph_vs_NCs[ph] = [NC,]
-		ph_list = list(ph_vs_NCs.keys())
-		ph_vs_highest_NCev = {ph: NC_vs_evolv[max(NC_list, key=NC_vs_size.get)] for ph, NC_list in ph_vs_NCs.items()}
-		ph_vs_av_NCev = {ph: np.sum([NC_vs_evolv[NC]*NC_vs_size[NC] for NC in NC_list])/np.sum([NC_vs_size[NC] for NC in NC_list]) for ph, NC_list in ph_vs_NCs.items()}
-		ax[i//5, i%5].scatter([ph_vs_av_NCev[ph] for ph in ph_list], [ph_vs_highest_NCev[ph] for ph in ph_list], s=5, c='r', linestyle='-', zorder=0)
-		max_x = max(ph_vs_highest_NCev.values()) + 3
-		ax[i//5, i%5].plot([0, max_x], [0, max_x], c='k', linestyle=':', zorder=-2)
-		ax[i//5, i%5].set_title(plotparam.type_structure_vs_label[type_structure])
-		ax[i//5, i%5].set_xlim(0, max_x)
-		ax[i//5, i%5].set_xlim(0, max_x)
-		ax[i//5, i%5].set_xlabel(r'expected $\epsilon_{NC}$ for a NC chosen'+'\n'+'at random with probability $\propto$|NC|'+'\nfrom NCs mapping to phenotype p')
-		ax[i//5, i%5].set_ylabel(r'$\epsilon_{NC}$ of the largest NC'+'\nfor phenotype p') #+'\n'+r'$\epsilon_p = 0$ plotted as -1')
-	[ax[i//5, i%5].annotate('ABCDEFGHIJ'[i], xy=(0.05, 0.85), xycoords='axes fraction', fontsize=17, fontweight='bold') for i in range(9)]
-	ax[9//5, 9%5].axis('off')
-
-f.tight_layout()
-f.savefig('./plots/evolv_neutral_set.png', bbox_inches='tight', dpi=200)

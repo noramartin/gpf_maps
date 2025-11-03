@@ -10,7 +10,6 @@ import random
 import parameters as param
 from functions.navigability_functions import *
 from functions.fibonacci_functions import get_Fibonacci_GPmap, neighbours_g_not_stopcodon
-
 ####################################################################################################################################################
 ####################################################################################################################################################
 type_structure = sys.argv[1]
@@ -46,6 +45,8 @@ for exclude_zero_evolv in [False, True]:
 	NC_array, NCindex_vs_ph = find_all_NCs(GPmap, neighbors_function, filename='./data/NC_array'+ type_structure, highly_fragmented=False)
 	NCs, counts = np.unique(NC_array, return_counts=True)
 	NC_vs_size = {NCindex: count for NCindex, count in zip(NCs, counts) if NCindex > 0}
+	if type_structure == 'HP_20':
+		assert len(NC_vs_size) == 6586
 	save_dict(NC_vs_size, './data/NC_array'+ type_structure +'NC_vs_size.csv')
 	ph_vs_NClist = get_ph_vs_NCs(NCindex_vs_ph)
 	####################################################################################################################################################
@@ -85,19 +86,33 @@ for exclude_zero_evolv in [False, True]:
 		####################################################################################################################################################
 		print('peaks analysis - need number of peaks and heights', distribution)
 		####################################################################################################################################################
+		total_peak_number_filename = './data/total_peak_number_'+type_structure+filename_addition+'_iterations'+str(param.iterations_peaks)+ distribution+'.npy'
 		total_peak_size_filename = './data/total_peak_size_'+type_structure+filename_addition+'_iterations'+str(param.iterations_peaks)+ distribution+'.npy'
 		peak_evolv_height_filename = './data/peak_evolv_height_'+type_structure+filename_addition+'_iterations'+str(param.iterations_peaks)+ distribution+'.csv'
-		if not isfile(peak_evolv_height_filename) or not isfile(total_peak_size_filename):
-			total_peak_size_list, peak_evolv_list, peak_height_list, iteration_list, peak_size_list = count_peaks(NC_network, NCindex_vs_ph, NC_vs_evolv, NC_vs_size, phenotypes_list, distribution, param.iterations_peaks)
+		peak_heights_reached_evolv = './data/peak_heights_reached_evolv_'+type_structure+filename_addition+'_pfmaps'+str(param.no_pf_maps_evolutionary_walks)+'_nruns'+str(param.no_runs_evolutionary_walks)+'pop_size'+str(param.pop_size_evolutionary_walks)+ distribution+'.csv'
+		if not isfile(peak_evolv_height_filename) or not isfile(total_peak_size_filename) or not isfile(total_peak_number_filename) or not (isfile(peak_heights_reached_evolv) and not exclude_zero_evolv):
+			total_peak_number_list, total_peak_size_list, peak_evolv_list, peak_height_list, iteration_list, peak_size_list, peak_NC_list, pf_map_list = count_peaks(NC_network, NCindex_vs_ph, NC_vs_evolv, NC_vs_size, 
+				                                                                                                                                                     phenotypes_list, distribution, param.iterations_peaks, return_pf_maps =True, save_heights_up_to_iteration=param.no_pf_maps_evolutionary_walks)
 			np.save(total_peak_size_filename, total_peak_size_list)
-			df_peak_evolv_height = pd.DataFrame.from_dict({'iteration': iteration_list, 'peak evolvability': peak_evolv_list, 'peak height': peak_height_list, 'peak size': peak_size_list})
+			np.save(total_peak_number_filename, total_peak_number_list)
+			df_peak_evolv_height = pd.DataFrame.from_dict({'iteration': iteration_list, 'peak evolvability': peak_evolv_list, 'peak height': peak_height_list, 'peak size': peak_size_list, 'peak NC': peak_NC_list})
 			df_peak_evolv_height.to_csv(peak_evolv_height_filename)	
+			if not exclude_zero_evolv:
+				peak_heights_reached_evol_df = peak_heights_reached_evolv_random_walk(NC_array, pf_map_list[:param.no_pf_maps_evolutionary_walks], N=param.pop_size_evolutionary_walks, iterations=param.no_runs_evolutionary_walks,
+																					  NCindex_vs_ph=NCindex_vs_ph, NC_network=NC_network, neighbors_function=neighbors_function, NC_vs_size=NC_vs_size)
+				peak_heights_reached_evol_df.to_csv(peak_heights_reached_evolv)	
+
+				
 	####################################################################################################################################################
 	print('navigability analysis')
 	####################################################################################################################################################
 	navigability_filename = './data/navigability'+type_structure+filename_addition+'_iterations'+str(param.iterations_nav)+'number_source_target_pairs'+str(param.number_source_target_pairs)+'.npy'
 	if not isfile(navigability_filename):
-		navigability = find_navigability(param.iterations_nav, param.number_source_target_pairs, NC_network, ph_vs_NClist, NCindex_vs_ph, NC_vs_size)
+		if exclude_zero_evolv:
+			ph_vs_NClist2 = {ph: [NC for NC in l if NC in NC_network] for ph, l in ph_vs_NClist.items()}
+		else:
+			ph_vs_NClist2 = ph_vs_NClist
+		navigability = find_navigability(param.iterations_nav, param.number_source_target_pairs, NC_network, ph_vs_NClist2, NCindex_vs_ph, NC_vs_size)
 		np.save(navigability_filename, np.array([navigability,]))
 	####################################################################################################################################################
 	print('navigability analysis for the largest network component')
@@ -105,6 +120,8 @@ for exclude_zero_evolv in [False, True]:
 	navigability_filename = './data/largest_component_navigability'+type_structure+filename_addition+'_iterations'+str(param.iterations_nav)+'number_source_target_pairs'+str(param.number_source_target_pairs)+'.npy'
 	if not exclude_zero_evolv:
 		largest_component_network = get_largest_component(NC_network)
+		NC_vs_evolv_component = {NC: len(set([NCindex_vs_ph[NC2] for NC2 in largest_component_network.neighbors(NC)])) for NC in largest_component_network.nodes()}
+		assert min([e for e in NC_vs_evolv_component.values()]) >= 1
 		ph_vs_NClist_component = {ph: [n for n in nlist if n in largest_component_network.nodes()] for ph, nlist in ph_vs_NClist.items()}
 		NCindex_vs_ph_component= {n:ph for n, ph in NCindex_vs_ph.items() if n in largest_component_network.nodes()}
 		NC_vs_size_component= {n:s for n, s in NC_vs_size.items() if n in largest_component_network.nodes()}
@@ -112,7 +129,7 @@ for exclude_zero_evolv in [False, True]:
 		np.save(navigability_filename, np.array([navigability,]))
 		###
 		NC_list_to_include_component = [max(NC_list, key=NC_vs_size.get) for ph, NC_list in ph_vs_NClist_component.items() if len(NC_list) > 0]
-		NC_vs_evolv2_component = {NC: len(set([NCindex_vs_ph[NC2] for NC2 in largest_component_network.neighbors(NC)])) for NC in NC_list_to_include_component}
+		NC_vs_evolv2_component = {NC: len(set([NCindex_vs_ph[NC2] for NC2 in largest_component_network.neighbors(NC) if NC2 in NC_list_to_include_component])) for NC in NC_list_to_include_component}
 		save_dict(NC_vs_evolv2_component, './data/largest_component_NC_evolv_'+type_structure+filename_addition+ '_oneNC_per_pheno.csv')
 		###
 		ph_vs_evolv_component = {ph: len(set([NCindex_vs_ph[NC2] for NC in ph_vs_NClist_component[ph] for NC2 in largest_component_network.neighbors(NC)])) for ph in phenotypes_list if len(ph_vs_NClist_component[ph]) > 0}
@@ -132,6 +149,8 @@ for exclude_zero_evolv in [False, True]:
 	if not isfile(NC_evolv_filename2) and not exclude_zero_evolv:
 		NC_list_to_include = [max(NC_list, key=NC_vs_size.get) for ph, NC_list in ph_vs_NClist.items()]
 		NC_vs_evolv2 = {NC: len(set([NCindex_vs_ph[NC2] for NC2 in NC_network.neighbors(NC) if NC2 in NC_list_to_include])) for NC in NC_list_to_include}
+		for NC in NC_list_to_include:
+			assert len(set([NCindex_vs_ph[NC2] for NC2 in NC_network.neighbors(NC) if NC2 in NC_list_to_include])) == len([NCindex_vs_ph[NC2] for NC2 in NC_network.neighbors(NC) if NC2 in NC_list_to_include]) # only have one NC per pheno
 		save_dict(NC_vs_evolv2, NC_evolv_filename2)
 
 if 'null' in type_structure:
@@ -144,7 +163,7 @@ print('repeat analysis for limited dimensionality in GP map')
 ####################################################################################################################################################
 ####################################################################################################################################################
 
-for dimensionality in np.arange(1, L)[::-1]:
+for dimensionality in np.arange(1, L):#[::-1]:
 	print('dimensionality', dimensionality)
 	sites_to_mutate = np.random.choice(L, size=dimensionality, replace=False)
 	assert len(set(sites_to_mutate)) == dimensionality and max(sites_to_mutate) < L
@@ -188,7 +207,7 @@ for dimensionality in np.arange(1, L)[::-1]:
 			####################################################################################################################################################
 			total_peak_size_filename = './data/total_peak_size_'+type_structure_dim+'_iterations'+str(param.iterations_peaks)+ distribution+'.npy'
 			if not isfile(total_peak_size_filename):
-				total_peak_size_list, peak_evolv_list, peak_height_list, iteration_list, peak_size_list = count_peaks(NC_network, NCindex_vs_ph, NC_vs_evolv, NC_vs_size, phenotypes_list, distribution, param.iterations_peaks)
+				total_peak_number_list, total_peak_size_list, peak_evolv_list, peak_height_list, iteration_list, peak_size_list, peak_NC_list = count_peaks(NC_network, NCindex_vs_ph, NC_vs_evolv, NC_vs_size, phenotypes_list, distribution, param.iterations_peaks, save_heights_up_to_iteration=1)
 				np.save(total_peak_size_filename, total_peak_size_list)
 
 ####################################################################################################################################################
@@ -239,5 +258,5 @@ for distribution in ['uniform']:
 	####################################################################################################################################################
 	total_peak_size_filename = './data/total_peak_size_'+type_structure_dim+'_iterations'+str(param.iterations_peaks)+ distribution+'.npy'
 	if not isfile(total_peak_size_filename):
-		total_peak_size_list, peak_evolv_list, peak_height_list, iteration_list, peak_size_list = count_peaks(NC_network, NCindex_vs_ph, NC_vs_evolv, NC_vs_size, phenotypes_list, distribution, param.iterations_peaks)
+		total_peak_number_list, total_peak_size_list, peak_evolv_list, peak_height_list, iteration_list, peak_size_list, peak_NC_list = count_peaks(NC_network, NCindex_vs_ph, NC_vs_evolv, NC_vs_size, phenotypes_list, distribution, param.iterations_peaks, save_heights_up_to_iteration=1)
 		np.save(total_peak_size_filename, total_peak_size_list)
