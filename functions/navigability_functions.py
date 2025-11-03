@@ -6,6 +6,9 @@ import itertools
 from os.path import isfile
 import random
 import pandas as pd
+from .fibonacci_functions import Hamming_dist
+
+
 
 def save_dict(dict_to_save, filename):
 	keys_list = [k for k in dict_to_save.keys()]
@@ -21,6 +24,7 @@ def load_dict(filename):
 def get_largest_component(NC_graph):
 		S = [NC_graph.subgraph(c).copy() for c in nx.connected_components(NC_graph)] # get component subgraph, from networkx documentation
 		index_largest_component = max(np.arange(len(S)), key={i: len(c.nodes()) for i, c in enumerate(S)}.get)
+		assert len(S[index_largest_component]) == max([len(x) for x in S])
 		print('fraction of NCs in largest component', len(S[index_largest_component])/len(NC_graph))
 		return S[index_largest_component]
 
@@ -130,6 +134,7 @@ def connected_component_fragmented(g0, GPmap, neighbors_function):
 		number_in_U -= 1
 		V_list.append(deepcopy(g1))
 		counter += 1
+		assert number_in_U == len(U_list)
 		if counter % 10**4 == 0:
 			print(str(counter) + ' genotypes evaluated')
 			assert number_in_U == len(U_list)
@@ -201,32 +206,105 @@ def read_in_Greenbury_data(filename_genos, K, L):
 	return GPmap
 #######################################################################
 
-def count_peaks(NC_network, NCindex_vs_ph, NC_vs_evolv, NC_vs_size, phenotpes_list, distribution, iterations_peaks):
+def count_peaks(NC_network, NCindex_vs_ph, NC_vs_evolv, NC_vs_size, phenotpes_list, distribution, iterations_peaks, return_pf_maps=False, save_heights_up_to_iteration=np.nan):
 	assert 0 not in phenotpes_list
-	total_peak_size_list, peak_evolv_list, peak_height_list, iteration_list, peak_size_list = [], [], [], [], []
+	total_peak_number_list, total_peak_size_list, peak_evolv_list, peak_height_list, iteration_list, peak_size_list, pf_map_list, peak_NC_list = [], [], [], [], [], [], [], []
 	for iteration in range(iterations_peaks):
-		print('peak size iteration', iteration)
-		total_size = 0
+		total_size, peak_no = 0, 0
 		if distribution == 'uniform':
 			pheno_vs_fitness = {ph: f for ph, f in zip(phenotpes_list, np.random.uniform(size=len(phenotpes_list)))}
 		elif distribution == 'exponential':
 			pheno_vs_fitness = {ph: f for ph, f in zip(phenotpes_list, np.random.exponential(size=len(phenotpes_list)))}
+		if return_pf_maps:
+			pf_map_list.append(deepcopy(pheno_vs_fitness))
 		assert min([f for f in pheno_vs_fitness.values()]) > 0
 		### number of peaks
 		for NC in NC_network.nodes():
 			fitness_NC = pheno_vs_fitness[NCindex_vs_ph[NC]]
 			if max([pheno_vs_fitness[NCindex_vs_ph[NC2]] for NC2 in NC_network.neighbors(NC)]+[-1,]) < fitness_NC:
-				if len(peak_height_list) < 5*10**6:
+				if np.isnan(save_heights_up_to_iteration) or iteration <= save_heights_up_to_iteration or len(peak_height_list) < 5* 10**6:
 					peak_height_list.append(pheno_vs_fitness[NCindex_vs_ph[NC]])
 					peak_evolv_list.append(NC_vs_evolv[NC])
 					peak_size_list.append(NC_vs_size[NC])
+					peak_NC_list.append(NC)
 					iteration_list.append(iteration)
 				total_size += NC_vs_size[NC]
+				peak_no += 1
 		total_peak_size_list.append(total_size)
-	return total_peak_size_list, peak_evolv_list, peak_height_list, iteration_list, peak_size_list
+		total_peak_number_list.append(peak_no)
+	if return_pf_maps:
+		return total_peak_number_list,total_peak_size_list, peak_evolv_list, peak_height_list, iteration_list, peak_size_list, peak_NC_list, pf_map_list
+	return total_peak_number_list,total_peak_size_list, peak_evolv_list, peak_height_list, iteration_list, peak_size_list, peak_NC_list
+
+def peak_heights_reached_evolv_random_walk(geno_to_NCindex, pf_map_list, N, iterations, NCindex_vs_ph, NC_network, neighbors_function, NC_vs_size, type_walk = 'Kimura'):
+	print('start adaptive walks')
+	pf_map_index_list, final_fitness_list, type_walk_list, NC_reached_list = [], [], [], []
+	NCindex_vs_ph[0] = 0
+	for pf_map_index, pheno_vs_fitness in enumerate(pf_map_list):
+		pheno_vs_fitness[0] = 0
+		NCindex_vs_fitness = {NC: pheno_vs_fitness[NCindex_vs_ph[NC]] for NC in NCindex_vs_ph}
+		NCindex_vs_fitness[0] = 0
+		peaks = [NC for NC in NC_network.nodes() if max([NCindex_vs_fitness[NC2] for NC2 in NC_network.neighbors(NC)]+[-1,]) < NCindex_vs_fitness[NC]]
+		assert 0 not in peaks
+		for i in range(iterations):
+			print('start adaptive walk', pf_map_index, i)
+			ph_with_lowest_fitness_peak = NCindex_vs_ph[min(peaks, key=NCindex_vs_fitness.get)]
+			assert abs(pheno_vs_fitness[ph_with_lowest_fitness_peak] - min([NCindex_vs_fitness[NC] for NC in peaks])) < 0.001
+			genotype = choose_non_peak_non_undefined_geno(peaks, geno_to_NCindex, ph_max_fitness = ph_with_lowest_fitness_peak, NCindex_vs_fitness=NCindex_vs_fitness, NC_vs_size=NC_vs_size, NCindex_vs_ph=NCindex_vs_ph, pheno_vs_fitness=pheno_vs_fitness)
+			if len(genotype) == 1:
+				print('no NC below lowest peak')
+				continue
+			while geno_to_NCindex[genotype] not in peaks:
+				current_f = NCindex_vs_fitness[geno_to_NCindex[genotype]]
+				uphill_neighbours = [tuple([x for x in g]) for g in neighbors_function(genotype) if NCindex_vs_fitness[geno_to_NCindex[g]] > current_f or geno_to_NCindex[g] == geno_to_NCindex[genotype]]#neutral or fitter
+				if type_walk == 'Kimura':
+					neighbours_s = [NCindex_vs_fitness[geno_to_NCindex[n]]/current_f - 1 if geno_to_NCindex[n] != geno_to_NCindex[genotype] else 0 for n in uphill_neighbours]
+					assert min(neighbours_s) >= 0
+					kimura_weights = [(1-np.exp(-2*s))/(1-np.exp(-2* N * s)) if abs(N*s) > 10**(-2) else 1/N for s in neighbours_s] # set manual for small-s to avoid overflow problems
+					g2 = deepcopy(uphill_neighbours[np.random.choice(len(uphill_neighbours), p=np.divide(kimura_weights, np.sum(kimura_weights)))])
+					assert Hamming_dist(g2, genotype) == 1 and (NCindex_vs_fitness[geno_to_NCindex[g2]] > NCindex_vs_fitness[geno_to_NCindex[genotype]] or geno_to_NCindex[g2] == geno_to_NCindex[genotype])
+					genotype = tuple([x for x in g2])
+				elif type_walk == 'uphill':
+					genotype = deepcopy(uphill_neighbours[np.random.choice(len(uphill_neighbours))])
+				elif type_walk == 'greedy':
+					neighbourindex_vs_f = {i: neighbours_vs_f[g] for i, g in enumerate(uphill_neighbours)}
+					if max(list(neighbours_vs_f.values())) > current_f:
+						genotype = deepcopy(uphill_neighbours[max(np.arange(len(uphill_neighbours)), key=neighbourindex_vs_f.get)])
+					else:
+						genotype = deepcopy(uphill_neighbours[np.random.choice(len(uphill_neighbours))])
+				else:
+					raise RuntimeError('unknown walk_type')
+			assert geno_to_NCindex[genotype] in peaks
+			pf_map_index_list.append(pf_map_index)
+			final_fitness_list.append(NCindex_vs_fitness[geno_to_NCindex[genotype]])
+			type_walk_list.append(type_walk)
+			NC_reached_list.append(geno_to_NCindex[genotype])
+			print('end adaptive walk', pf_map_index, i)
+			if i % 10**3 == 0:
+				print(type_walk, i, 'th iteration', pf_map_index, 'th pf map')
+	df_evolutionary_walks = pd.DataFrame.from_dict({'PF map index': pf_map_index_list, 'final fitness': final_fitness_list, 'type_walk': type_walk_list, 'final NC': NC_reached_list})
+	return df_evolutionary_walks
 
 
-#######################################################################
+def choose_non_peak_non_undefined_geno(peaks, geno_to_NCindex, ph_max_fitness = np.nan, NCindex_vs_fitness={}, NC_vs_size={}, NCindex_vs_ph={}, pheno_vs_fitness={}):
+	K, L = geno_to_NCindex.shape[1], geno_to_NCindex.ndim
+	if not np.isnan(ph_max_fitness):
+		max_fitness = pheno_vs_fitness[ph_max_fitness]
+		NCs_below_fitness = [NCindex for NCindex, f in NCindex_vs_fitness.items() if f < max_fitness and NCindex_vs_ph[NCindex] != ph_max_fitness and NCindex > 0 and NCindex not in peaks]
+		if len(NCs_below_fitness) == 0:
+			return [np.nan]
+	else:
+		NCs_below_fitness = [NCindex for NCindex, f in NCindex_vs_fitness.items() if NCindex > 0 and NCindex not in peaks]
+	NCsize_list = [NC_vs_size[NCindex] for NCindex in NCs_below_fitness]
+	NCindex = np.random.choice(NCs_below_fitness, p=np.divide(NCsize_list, np.sum(NCsize_list))) # want each genotype to appear with equal likelihood, so weigh by NC size
+	NC = np.argwhere(geno_to_NCindex == NCindex)
+	assert len(NC) == NC_vs_size[NCindex]
+	g =  tuple([x for x in NC[np.random.choice(len(NC))]])
+	assert geno_to_NCindex[g] == NCindex and NCindex > 0 and NCindex not in peaks
+	assert np.isnan(ph_max_fitness) or (NCindex_vs_ph[NCindex] != ph_max_fitness and NCindex_vs_fitness[NCindex] < max_fitness)
+	return g
+
+
 
 def find_navigability(iterations, number_source_target_pairs, NC_network, pheno_vs_NCs, NC_vs_ph, NC_vs_size, all_connected=False):
 	if all_connected:
@@ -234,18 +312,23 @@ def find_navigability(iterations, number_source_target_pairs, NC_network, pheno_
 	nav, nav_norm = 0, 0
 	phenotpes_list = list([p for p in pheno_vs_NCs.keys() if len([NC for NC in pheno_vs_NCs[p] if NC in NC_network.nodes()]) > 0])
 	for iteration in range(iterations):
-		NC_network_directed_edges = get_directed_network_edges(NC_network, pheno_vs_NCs, NC_vs_ph)
+		NC_network_directed_edges, pheno_vs_fitness = get_directed_network_edges(NC_network, pheno_vs_NCs, NC_vs_ph, return_fitness=True)
+		target_ph = max(phenotpes_list, key=pheno_vs_fitness.get)
+		NC_network_directed_st = make_network(NC_network_directed_edges, NC_network)
 		for source_target_count in range(number_source_target_pairs):
-			source_ph = np.random.choice(phenotpes_list)
-			target_ph = np.random.choice([p for p in phenotpes_list if p != source_ph])
+			source_ph = np.random.choice([p for p in phenotpes_list if p != target_ph])
 			sourceNCs = [NC for NC in pheno_vs_NCs[source_ph] if NC in NC_network.nodes()]
 			source = np.random.choice(sourceNCs, p = np.array([NC_vs_size[NC] for NC in sourceNCs])/sum([NC_vs_size[NC] for NC in sourceNCs]))
-			NC_network_directed_st = make_network_given_target(NC_network_directed_edges, NC_network, target_ph, NC_vs_ph, pheno_vs_NCs)
+			for n in [source,] + [t for t in pheno_vs_NCs[target_ph]]:
+				if n not in NC_network_directed_st:
+					assert len([z for z in NC_network.neighbors(n)]) == 0
+					NC_network_directed_st.add_node(n)
 			is_accessible = 0
 			for target in pheno_vs_NCs[target_ph]:
+				assert len([n for n in NC_network_directed_st.neighbors(target)]) == 0 # no upwards steps from target
 				if all_connected: #working with simple connected component, so undirected graph needs to be connected
 					assert nx.has_path(NC_network, source, target)
-				if target in NC_network.nodes() and nx.has_path(NC_network_directed_st, source, target):
+				if nx.has_path(NC_network_directed_st, source, target):
 					is_accessible = 1
 					break 		
 			nav += is_accessible
@@ -254,31 +337,26 @@ def find_navigability(iterations, number_source_target_pairs, NC_network, pheno_
 	print('navigability', nav/nav_norm)
 	return nav/nav_norm
 
-def get_directed_network_edges(NC_network, pheno_vs_NCs, NC_vs_ph):
+def get_directed_network_edges(NC_network, pheno_vs_NCs, NC_vs_ph, return_fitness = False):
 	pheno_vs_fitness = {ph: f for ph, f in zip(list(pheno_vs_NCs.keys()), np.random.uniform(size=len(list(pheno_vs_NCs.keys()))))}
 	assert min([f for f in pheno_vs_fitness.values()]) > 0 and max([f for f in pheno_vs_fitness.values()]) < 1
 	NC_network_directed_edges = []
 	for NC1, NC2 in NC_network.edges():
-		if not pheno_vs_fitness[NC_vs_ph[NC1]] != pheno_vs_fitness[NC_vs_ph[NC2]]:
-			print('adjacant edges same fitnes', NC1, NC2, pheno_vs_fitness[NC_vs_ph[NC1]], pheno_vs_fitness[NC_vs_ph[NC2]])
 		assert pheno_vs_fitness[NC_vs_ph[NC1]] != pheno_vs_fitness[NC_vs_ph[NC2]]
 		if pheno_vs_fitness[NC_vs_ph[NC1]] < pheno_vs_fitness[NC_vs_ph[NC2]]:
 			NC_network_directed_edges.append((NC1, NC2))
 		else:
 			NC_network_directed_edges.append((NC2, NC1))
-	return NC_network_directed_edges
+	if not return_fitness:
+		return NC_network_directed_edges
+	else:
+		return NC_network_directed_edges, pheno_vs_fitness
 
 
-def make_network_given_target(NC_network_directed_edges, NC_network, target_ph, NC_vs_ph, ph_vs_NClist):
+def make_network(NC_network_directed_edges, NC_network):
 	NC_network_directed_st = nx.DiGraph()
 	NC_network_directed_st.add_nodes_from([NC for NC in NC_network.nodes()])
-	NC_network_directed_st.add_edges_from([e for e in NC_network_directed_edges if target_ph not in [NC_vs_ph[e[0]], NC_vs_ph[e[1]]]])
-	for target in ph_vs_NClist[target_ph]:
-		if target in NC_network:
-			NC_network_directed_st.add_node(target)
-			for ph in NC_network.neighbors(target):
-				NC_network_directed_st.add_edge(ph, target) #target is higher by definition (forced to one)	
-			assert len([n for n in NC_network_directed_st.neighbors(target)]) == 0 # no upwards steps from target
+	NC_network_directed_st.add_edges_from([e for e in NC_network_directed_edges])
 	return NC_network_directed_st
 
 ############################################################################################################

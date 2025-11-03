@@ -53,14 +53,14 @@ def make_phenotype_network(GPmap, neighbours_function, phenotpes_list=[]):
 		phenotpes_list = [ph for ph in np.unique(GPmap) if ph > 0]
 	phenotype_network = nx.Graph()
 	for g, ph in np.ndenumerate(GPmap):
-		if ph in phenotpes_list and ph >= 0:
+		if ph in phenotpes_list and ph > 0:
 			if ph not in phenotype_network.nodes():
 				phenotype_network.add_node(ph)
 			neighbours = neighbours_function(g)
 			for g2 in neighbours:
 				ph2 = GPmap[g2]
 				if ph2 != ph and ph2 in phenotpes_list:
-					if ph >= 0 and ph2 >= 0 and ph2 not in phenotype_network.neighbors(ph):
+					if ph > 0 and ph2 > 0 and ph2 not in phenotype_network.neighbors(ph):
 						phenotype_network.add_edge(ph, ph2) 
 	for ph in phenotype_network.nodes():
 		assert ph in phenotpes_list
@@ -74,7 +74,8 @@ def make_genotype_network_tests(GPmap, neighbours_function, pf_map):
 	K, L = GPmap.shape[0], len(GPmap.shape)
 	genotype_network = nx.MultiDiGraph()
 	for g, ph in np.ndenumerate(GPmap):
-		genotype_network.add_node(''.join([str(x) for x in g]))
+		if ''.join([str(x) for x in g]) not in genotype_network:
+			genotype_network.add_node(''.join([str(x) for x in g]))
 		neighbours = neighbours_function(g)
 		for g2 in neighbours:
 			ph2 = GPmap[g2]
